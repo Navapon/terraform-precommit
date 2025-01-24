@@ -19,7 +19,7 @@ data "aws_ami" "al2023_arm64" {
 resource "aws_instance" "community_demo" {
   instance_type = "t4g.nano"
   # instance_type = var.instance_type
-  ami           = data.aws_ami.al2023_arm64.id
+  ami = data.aws_ami.al2023_arm64.id
 
   associate_public_ip_address = true
 
@@ -29,7 +29,7 @@ resource "aws_instance" "community_demo" {
   }
 
   tags = {
-    "Project" = "",
+    "Project" = "community-days",
     "Team"    = ""
   }
 }
