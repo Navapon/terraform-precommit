@@ -3,7 +3,7 @@
 ## Run Check All
 
 ```bash
-pre-commit run --file main.tf 
+pre-commit run --file main.tf
 ```
 
 ## Trivy
@@ -21,5 +21,5 @@ pre-commit run terraform_checkov --file main.tf
 ## TFLint
 
 ```bash
-pre-commit run terraform_tflint --file main.tf 
+pre-commit run terraform_tflint --file main.tf
 ```
