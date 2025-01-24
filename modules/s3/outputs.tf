@@ -17,4 +17,3 @@ output "website_endpoint" {
   value       = aws_s3_bucket_website_configuration.this[*].website_endpoint != null ? one(aws_s3_bucket_website_configuration.this[*].website_endpoint) : "S3 static website is not configured"
   description = "output of s3 static website endpoint"
 }
-
