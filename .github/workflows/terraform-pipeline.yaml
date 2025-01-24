@@ -118,10 +118,10 @@ jobs:
           wget https://github.com/terraform-linters/tflint/releases/download/v${{ env.TFLINT_VERSION }}/tflint_$(uname)_amd64.zip -O tflint.zip && sudo unzip -d ${{ env.BIN_DIR_PATH }} tflint.zip
           wget https://github.com/terraform-docs/terraform-docs/releases/download/v${{ env.TERRAFORM_DOCS_VERSION }}/terraform-docs-v${{ env.TERRAFORM_DOCS_VERSION }}-$(uname)-amd64.tar.gz -O terraform-docs.tar.gz && sudo tar xzv -C ${{ env.BIN_DIR_PATH }} -f terraform-docs.tar.gz
 
-      # - name: Setup Infracost
-      #   uses: infracost/actions/setup@e9d6e6cd65e168e76b0de50ff9957d2fe8bb1832
-      #   with:
-      #     api-key: ${{ secrets.INFRACOST_API_KEY }}
+      - name: Setup Infracost
+        uses: infracost/actions/setup@e9d6e6cd65e168e76b0de50ff9957d2fe8bb1832
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
 
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@ff1b8b060f23b650436d419b5e13f67f5d4c3087
@@ -157,16 +157,12 @@ jobs:
           echo "LOG_FILE_PATH=$log_file_path" >> $GITHUB_ENV
 
       - name: Run Pre-commit linter
-        continue-on-error: false
         run: |
           echo "Run pre-commit at \`${{ matrix.changed-dir-path }}\`" >> ${{ env.LOG_FILE_PATH }}
           echo "Location: ${{ env.TF_DIR_PATH }}" >> ${{ env.LOG_FILE_PATH }}
           echo "\`\`\`hcl" >> ${{ env.LOG_FILE_PATH }}
           pre-commit run --config ${{ env.PRE_COMMIT_CONFIG_PATH }} --file ${{ env.TF_DIR_PATH }}/*.tf 2>&1 | tee -a ${{ env.LOG_FILE_PATH }}
           echo "\`\`\`" >> ${{ env.LOG_FILE_PATH }}
-          if grep -q "exit code: 1" ${{ env.LOG_FILE_PATH }} || grep -q "exit code: 2" ${{ env.LOG_FILE_PATH }}; then
-            exit 1
-          fi
 
       - name: Add terraform commit
         uses: EndBug/add-and-commit@a94899bca583c204427a224a7af87c02f9b325d5 # v9.1.4
@@ -179,10 +175,7 @@ jobs:
             - '*.md'
             - '*.tf'
           new_branch: "${{ github.head_ref }}"
-      # ----------------------- End ------------------------
-      # ----------------------------------------------------
 
-      # ------------------ Comment to PR -------------------
       - name: Find PR comment
         uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
         id: fc
@@ -206,6 +199,12 @@ jobs:
           body-path: ${{ env.LOG_FILE_PATH }}
           edit-mode: replace
           reactions: hooray
+
+      - name: Check Pre-commit Error
+        run: |
+          if grep -q "exit code: 1" ${{ env.LOG_FILE_PATH }} || grep -q "exit code: 2" ${{ env.LOG_FILE_PATH }}; then
+            exit 1
+          fi
 
   terraform:
     name: "Terraform Infrastructure Change Management"
