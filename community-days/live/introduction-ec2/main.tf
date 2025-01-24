@@ -29,7 +29,7 @@ resource "aws_instance" "community_demo" {
   }
 
   tags = {
-    "Project" = "",
+    "Project" = "community-days",
     "Team"    = ""
   }
 }
