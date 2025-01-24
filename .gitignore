@@ -1,0 +1,5 @@
+.terraform*
+terraform.tfstate*
+*manifest*
+pricing.gob
+.infracost*

@@ -1,0 +1,45 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.23.2
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.97.0
+    hooks:
+      - id: terraform_fmt
+        args:
+          - --args=-diff
+          - --args=-write=true
+      - id: terraform_docs
+        args:
+          - --hook-config=--path-to-file=README.md
+          - --hook-config=--add-to-existing-file=true
+          - --hook-config=--create-file-if-not-exist=true
+      - id: terraform_tflint
+        args:
+          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
+      - id: terraform_validate
+      - id: terraform_trivy
+        files: ^community-days/live/
+        args:
+          # - --args=--format=json
+          - --args=--ignorefile=__GIT_WORKING_DIR__/.trivyignore.yaml
+      - id: terraform_checkov
+        # args:
+        #   - --args=--config-file __GIT_WORKING_DIR__/.checkov.yaml
+      - id: infracost_breakdown
+        args:
+          - --args=--path=./community-days/live/
+          - --args=--terraform-var-file="prod.tfvars"
+          - --args=--terraform-var-file="dev.tfvars"
+        verbose: true # Always show costs

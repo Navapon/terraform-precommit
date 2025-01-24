@@ -1,0 +1,312 @@
+name: Terraform linter
+
+on:
+  pull_request:
+    branches:
+      - main
+    path:
+      - "modules/**/**.tf"
+      - "community-days/**/**.tf"
+env:
+  PRE_COMMIT_CONFIG_PATH: .pre-commit-config.yaml
+  CHANGED_FILTER: |
+    terraform:
+      - added|modified: 'modules/**/**.tf'
+      - added|modified: 'community-days/live/**/**.tf'
+  TERRAFORM_VERSION: "1.10.5"
+  PRE_COMMIT_VERSION: "4.0.1"
+  TERRAFORM_DOCS_VERSION: "0.19.0"
+  TFLINT_VERSION: "0.55.0"
+  TRIVY_VERSION: "v0.58.2"
+  CHECKOV_VERSION: "3.2.352"
+
+jobs:
+  detect_change:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.filter.outputs.changes }}
+      changed-files: ${{ steps.filter_files.outputs.terraform_files }} # terraform_files: Paths to files will be available in `${FILTER_NAME}_files` output variable.
+      changed-dirs: ${{ steps.filter_dirs.outputs.terraform_dirs }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0 # Fetch all history of all tags and branches for a better relevancy of analysis
+
+      - id: filter_files
+        name: Filter changed files
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: ${{ env.CHANGED_FILTER }}
+          list-files: json
+
+      - id: filter_dirs
+        name: Filter changed directories
+        run: |
+          set -eux
+          dir_list=$(echo '${{ steps.filter_files.outputs.terraform_files }}' \
+          | jq -c '. | map(split("(\/)\\w+.tf";"")[0]) | unique')
+          printf "terraform_dirs=$dir_list" >> $GITHUB_OUTPUT
+
+      - name: List of changed files
+        run: echo ${{ steps.filter_files.outputs.terraform_files }}
+
+      - name: List of changed directories
+        run: echo ${{ steps.filter_dirs.outputs.terraform_dirs }}
+
+  run_pre_commit:
+    name: "Terraform linter"
+    needs: detect_change
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+      issues: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        changed-dir-path: ${{ fromJSON(needs.detect_change.outputs.changed-dirs) }}
+    env:
+      BIN_INSTALLER_FILE_PATH: ${{ github.workspace }}/bin_installer.sh
+      BIN_DIR_PATH: /usr/local/bin
+
+    steps:
+      # --------------------- Boostrap  --------------------
+      - name: Echo matrix
+        run: echo ${{ matrix.changed-dir-path }}
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0 # Fetch all history of all tags and branches for a better relevancy of analysis
+
+      - name: Echo current branch of terraform triggerer
+        run: echo ${{ github.head_ref }}
+      # ----------------------- End ------------------------
+      # ----------------------------------------------------
+
+      # ---------------- Builder for binary ----------------
+      - name: Dependencies version
+        run: |
+          echo "#!/bin/sh" >> ${{ env.BIN_INSTALLER_FILE_PATH }}
+          echo "${{ env.TERRAFORM_VERSION }}" >> ${{ env.BIN_INSTALLER_FILE_PATH }}
+          echo "${{ env.PRE_COMMIT_VERSION }}" >> ${{ env.BIN_INSTALLER_FILE_PATH }}
+          echo "${{ env.TERRAFORM_DOCS_VERSION }}" >> ${{ env.BIN_INSTALLER_FILE_PATH }}
+          echo "${{ env.TFLINT_VERSION }}" >> ${{ env.BIN_INSTALLER_FILE_PATH }}
+
+      - name: Dependencies cache
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        id: bin-cache
+        with:
+          path: |
+            ${{ env.BIN_DIR_PATH }}/terraform
+            ${{ env.BIN_DIR_PATH }}/tflint
+            ${{ env.BIN_DIR_PATH }}/terraform-docs
+          key: ${{ runner.os }}-bash-${{ hashFiles(env.BIN_INSTALLER_FILE_PATH) }}
+
+      - name: Dependencies installation
+        if: steps.bin-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt update && sudo apt install -y gnupg software-properties-common
+          wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+          sudo apt update && sudo apt install terraform=${{ env.TERRAFORM_VERSION }}-1
+          sudo mv /usr/bin/terraform ${{ env.BIN_DIR_PATH }}
+
+          wget https://github.com/terraform-linters/tflint/releases/download/v${{ env.TFLINT_VERSION }}/tflint_$(uname)_amd64.zip -O tflint.zip && sudo unzip -d ${{ env.BIN_DIR_PATH }} tflint.zip
+          wget https://github.com/terraform-docs/terraform-docs/releases/download/v${{ env.TERRAFORM_DOCS_VERSION }}/terraform-docs-v${{ env.TERRAFORM_DOCS_VERSION }}-$(uname)-amd64.tar.gz -O terraform-docs.tar.gz && sudo tar xzv -C ${{ env.BIN_DIR_PATH }} -f terraform-docs.tar.gz
+
+      # - name: Setup Infracost
+      #   uses: infracost/actions/setup@e9d6e6cd65e168e76b0de50ff9957d2fe8bb1832
+      #   with:
+      #     api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@ff1b8b060f23b650436d419b5e13f67f5d4c3087
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          cache: true
+
+      - name: Builder for init require python libraries
+        run: |
+          echo "pre-commit==${{ env.PRE_COMMIT_VERSION }}" >> requirements.txt
+          echo "checkov==${{ env.CHECKOV_VERSION }}" >> requirements.txt
+
+      - name: Builder for setup Python
+        id: py
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.12"
+          cache: "pip" # caching pip dependencies
+
+      - name: Builder for install python libraries
+        run: pip install -r requirements.txt
+
+      # ----------------------- End ------------------------
+      # ----------------------------------------------------
+
+      # --------------- Run terraform linter ---------------
+      - name: Setup env
+        run: |
+          tf_dir_path="${{ github.workspace }}/${{ matrix.changed-dir-path }}"
+          log_file_path="/tmp/$(basename $tf_dir_path).txt"
+
+          echo "TF_DIR_PATH=$tf_dir_path" >> $GITHUB_ENV
+          echo "LOG_FILE_PATH=$log_file_path" >> $GITHUB_ENV
+
+      - name: Run Pre-commit linter
+        continue-on-error: false
+        run: |
+          echo "Run pre-commit at \`${{ matrix.changed-dir-path }}\`" >> ${{ env.LOG_FILE_PATH }}
+          echo "Location: ${{ env.TF_DIR_PATH }}" >> ${{ env.LOG_FILE_PATH }}
+          echo "\`\`\`hcl" >> ${{ env.LOG_FILE_PATH }}
+          pre-commit run --config ${{ env.PRE_COMMIT_CONFIG_PATH }} --file ${{ env.TF_DIR_PATH }}/*.tf 2>&1 | tee -a ${{ env.LOG_FILE_PATH }}
+          echo "\`\`\`" >> ${{ env.LOG_FILE_PATH }}
+          if grep -q "exit code: 1" ${{ env.LOG_FILE_PATH }} || grep -q "exit code: 2" ${{ env.LOG_FILE_PATH }}; then
+            exit 1
+          fi
+
+      - name: Add terraform commit
+        uses: EndBug/add-and-commit@a94899bca583c204427a224a7af87c02f9b325d5 # v9.1.4
+        with:
+          default_author: github_actions
+          committer_name: GitHub Actions
+          committer_email: actions@github.com
+          message: "Modified by github action"
+          add: |
+            - '*.md'
+            - '*.tf'
+          new_branch: "${{ github.head_ref }}"
+      # ----------------------- End ------------------------
+      # ----------------------------------------------------
+
+      # ------------------ Comment to PR -------------------
+      - name: Find PR comment
+        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
+        id: fc
+        with:
+          issue-number: ${{ github.event.number }}
+          body-includes: "Location: ${{ env.TF_DIR_PATH }}"
+
+      - name: Create PR comment
+        if: steps.fc.outputs.comment-id == ''
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          issue-number: ${{ github.event.number }}
+          body-path: ${{ env.LOG_FILE_PATH }}
+          reactions: rocket
+
+      - name: Update PR comment
+        if: steps.fc.outputs.comment-id != ''
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          comment-id: ${{ steps.fc.outputs.comment-id }}
+          body-path: ${{ env.LOG_FILE_PATH }}
+          edit-mode: replace
+          reactions: hooray
+
+  terraform:
+    name: "Terraform Infrastructure Change Management"
+    needs: detect_change
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+      issues: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        changed-dir-path: ${{ fromJSON(needs.detect_change.outputs.changed-dirs) }}
+    steps:
+      - name: Echo matrix
+        run: echo ${{ matrix.changed-dir-path }}
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0 # Fetch all history of all tags and branches for a better relevancy of analysis
+
+      # This just using for quick demo setup
+      # Please set it correctly in your repository by following
+      # https://aws.amazon.com/blogs/security/use-iam-roles-to-connect-github-actions-to-actions-in-aws/
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 #v4.0.2
+        with:
+          aws-region: "ap-southeast-1"
+          role-session-name: "bad-user-using-secret"
+          role-duration-seconds: 1200
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+
+      - name: Setup env
+        run: |
+          tf_dir_path="${{ github.workspace }}/${{ matrix.changed-dir-path }}"
+          log_file_path="/tmp/$(basename $tf_dir_path).txt"
+
+          echo "TF_DIR_PATH=$tf_dir_path" >> $GITHUB_ENV
+          echo "LOG_FILE_PATH=$log_file_path" >> $GITHUB_ENV
+
+      - name: Setup Terraform with specified version on the runner
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform init
+        id: init
+        working-directory: ${{ matrix.changed-dir-path }}
+        run: |
+          terraform init -no-color -input=false
+
+      - name: Terraform plan
+        id: plan
+        working-directory: ${{ matrix.changed-dir-path }}
+        run: |
+          terraform plan -no-color -input=false > terraform.tfplan.txt    
+          cat terraform.tfplan.txt
+        continue-on-error: true
+
+      - name: Github comment, setup message (terragrunt plan)
+        working-directory: ${{ matrix.changed-dir-path }}
+        shell: bash
+        run: |
+          echo $(cat terraform.tfplan.txt )
+
+          echo "## Change detected in the following directories: \`${{ matrix.changed-dir-path }}\` 🚀" >>  ${{ env.LOG_FILE_PATH }}
+          echo "#### Terraform Initialization ⚙️ ${{ steps.init.outcome }}" >>  ${{ env.LOG_FILE_PATH }}
+          echo "#### Terraform Plan 📖 ${{ steps.plan.outcome }}" >>  ${{ env.LOG_FILE_PATH }}
+          echo "\`\`\`hcl" >>  ${{ env.LOG_FILE_PATH }}
+          echo "$(cat terraform.tfplan.txt)" >>  ${{ env.LOG_FILE_PATH }}
+          echo "\`\`\`" >>  ${{ env.LOG_FILE_PATH }}
+          echo "*Pushed by: @${{ github.actor }}, Action: ${{ github.event_name }}*" >>  ${{ env.LOG_FILE_PATH }}
+
+      # ------------------ Comment to PR -------------------
+      - name: Find PR comment
+        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
+        id: pr
+        with:
+          issue-number: ${{ github.event.number }}
+          body-includes: "## Change detected in the following directories: ${{ matrix.changed-dir-path }} 🚀"
+
+      - name: Create PR comment
+        if: steps.pr.outputs.comment-id == ''
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          issue-number: ${{ github.event.number }}
+          body-path: ${{ env.LOG_FILE_PATH }}
+          reactions: rocket
+
+      - name: Update PR comment
+        if: steps.pr.outputs.comment-id != ''
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          comment-id: ${{ steps.pr.outputs.comment-id }}
+          body-path: ${{ env.LOG_FILE_PATH }}
+          edit-mode: replace
+          reactions: hooray
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
