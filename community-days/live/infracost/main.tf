@@ -17,8 +17,8 @@ data "aws_ami" "al2023_arm64" {
 
 # trivy:ignore:AVD-AWS-0131/
 resource "aws_instance" "community_demo" {
-  # instance_type = "t4g.nano"
-  instance_type = var.instance_type
+  instance_type = "t4g.2xlarge"
+  # instance_type = var.instance_type
   ami           = data.aws_ami.al2023_arm64.id
 
   associate_public_ip_address = true
