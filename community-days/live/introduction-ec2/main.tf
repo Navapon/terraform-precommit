@@ -17,7 +17,7 @@ data "aws_ami" "al2023_arm64" {
 
 # trivy:ignore:AVD-AWS-0131/
 resource "aws_instance" "community_demo" {
-  instance_type = "t4g.nano"
+  instance_type = "t4g.large"
   # instance_type = var.instance_type
   ami = data.aws_ami.al2023_arm64.id
 
