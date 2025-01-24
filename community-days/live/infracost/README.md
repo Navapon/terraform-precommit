@@ -16,5 +16,6 @@ infracost breakdown --path=.
 ## Run with Pre-commit
 
 ```bash
+/Users/navapon/Personal/terraform-precommit/community-days/live/infracost
 pre-commit run infracost_breakdown --file main.tf  
 ```
