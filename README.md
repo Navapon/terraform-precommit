@@ -2,6 +2,10 @@
 
 This repository contains pre-commit hook configurations for Terraform projects to ensure code quality and consistency.
 
+## Description
+
+This repository is used for the Community Day AWS 2025 event. It provides a set of pre-commit hooks to maintain Terraform code quality and consistency across various projects. The hooks include formatting, documentation generation, linting, and security checks.
+
 ## Prerequisites
 
 Before you begin, ensure you have the following installed:
